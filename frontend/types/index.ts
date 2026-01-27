@@ -99,10 +99,41 @@ export interface Manual {
 }
 
 // Speech Recognition types for browsers
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message: string;
+}
+
+interface SpeechGrammarList {
+  length: number;
+  addFromString(string: string, weight?: number): void;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  grammars: SpeechGrammarList;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+
 declare global {
   interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechGrammarList: typeof SpeechGrammarList;
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechGrammarList: new () => SpeechGrammarList;
   }
 }
+
+export type { SpeechRecognition, SpeechRecognitionEvent, SpeechRecognitionErrorEvent };

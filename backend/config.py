@@ -1,6 +1,10 @@
 """Application configuration using pydantic-settings."""
 
+import json
 from functools import lru_cache
+from typing import Any
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -114,9 +118,23 @@ class Settings(BaseSettings):
     log_max_size_mb: int = 10
     log_backup_count: int = 10
 
-    # Security
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    # Security - accepts comma-separated string or JSON array from env
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
     api_key_header: str = "X-API-Key"
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins from comma-separated string or JSON array."""
+        if not self.cors_origins:
+            return []
+        # Try JSON first
+        try:
+            parsed = json.loads(self.cors_origins)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        # Fall back to comma-separated
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache

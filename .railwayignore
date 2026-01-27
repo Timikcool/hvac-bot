@@ -1,0 +1,35 @@
+# Python virtual environment
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Large data files
+backend/data/
+backend/uploads/
+backend/checkpoints/
+backend/logs/
+backups/
+documents/
+*.pdf
+*.snapshot
+
+# Frontend (deploy separately)
+frontend/
+frontend/node_modules/
+frontend/.next/
+
+# Secrets
+backend/.env
+backend/.env.*
+*.json
+!package.json
+!tsconfig.json
+
+# Git
+.git/
+
+# Dev files
+*.log
+.claude/
+

@@ -96,6 +96,8 @@ class ChatApiClient {
       suggestedFollowups: data.suggested_followups,
       requiresEscalation: data.requires_escalation,
       conversationId: data.conversation_id,
+      messageId: data.message_id,
+      responseTimeMs: data.response_time_ms,
     };
   }
 

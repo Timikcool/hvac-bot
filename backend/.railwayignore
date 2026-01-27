@@ -1,0 +1,24 @@
+# Python virtual environment (HUGE)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# Large data files - data is in Qdrant
+data/
+uploads/
+checkpoints/
+logs/
+*.pdf
+
+# Secrets
+.env
+.env.*
+*.json
+!package.json
+
+# Dev files
+*.log
+*.snapshot

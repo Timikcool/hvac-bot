@@ -1,5 +1,36 @@
 # HVAC AI Assistant - Technical Implementation Guide
 
+## 🚀 Production Deployment (Railway)
+
+**Live URLs:**
+- Frontend: https://hvac-frontend-production.up.railway.app
+- Backend API: https://hvac-api-production.up.railway.app
+- API Health: https://hvac-api-production.up.railway.app/api/health
+
+**Infrastructure (all on Railway private network for low latency):**
+| Service | Internal Address | Notes |
+|---------|------------------|-------|
+| PostgreSQL | `postgres.railway.internal:5432` | Conversations, feedback |
+| Redis | `redis.railway.internal:6379` | Caching, sessions |
+| Qdrant | `qdrant.railway.internal:6333` | 3711 vectors (3 HVAC books) |
+
+**Deployment Commands:**
+```bash
+# Backend
+cd hvac_bot && railway up --service hvac-api
+
+# Frontend  
+cd frontend && railway up --service hvac-frontend
+
+# View logs
+railway logs -s hvac-api
+railway logs -s hvac-frontend
+```
+
+See `DEPLOY.md` for full deployment guide and `SETUP.md` for local development.
+
+---
+
 ## Project Overview
 
 An AI-powered web application designed for HVAC technicians to diagnose and resolve equipment issues on-site. The system leverages RAG (Retrieval-Augmented Generation) to provide accurate, manual-grounded responses while supporting image recognition for equipment identification and problem diagnosis.

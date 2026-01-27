@@ -25,9 +25,13 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    """Get database URL from settings."""
+    """Get database URL from settings, ensuring async driver is used."""
     settings = get_settings()
-    return settings.database_url
+    url = settings.database_url
+    # Ensure we use asyncpg driver for async migrations
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
 
 
 def run_migrations_offline() -> None:

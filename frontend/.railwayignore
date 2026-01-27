@@ -1,0 +1,9 @@
+# Node modules (will be installed fresh)
+node_modules/
+.next/
+
+# Development files
+.env
+.env.local
+*.log
+
