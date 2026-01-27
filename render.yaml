@@ -1,0 +1,49 @@
+# Render Blueprint - Infrastructure as Code
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: hvac-bot-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: oregon
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hvac-bot-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: hvac-bot-redis
+          property: connectionString
+      - key: QDRANT_HOST
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GCP_PROJECT_ID
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+
+databases:
+  - name: hvac-bot-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: 16
+
+redis:
+  - name: hvac-bot-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+

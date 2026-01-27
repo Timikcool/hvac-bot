@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Environment files (contains secrets)
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# GCP Credentials
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# Build outputs
+.next/
+dist/
+build/
+*.egg-info/
+
+# Processing checkpoints (large files)
+backend/checkpoints/
+backend/uploads/
+backend/logs/
+
+# Local databases
+*.db
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cloud migration secrets
+.cloud-config
+
+# Qdrant local data
+qdrant_storage/
