@@ -15,6 +15,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Application
@@ -126,6 +127,9 @@ class Settings(BaseSettings):
         """Parse CORS origins from comma-separated string or JSON array."""
         if not self.cors_origins:
             return []
+        # Handle wildcard - allow all origins
+        if self.cors_origins.strip() == "*":
+            return ["*"]
         # Try JSON first
         try:
             parsed = json.loads(self.cors_origins)

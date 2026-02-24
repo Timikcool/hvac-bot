@@ -1,9 +1,11 @@
 """Main RAG pipeline orchestrating all components."""
 
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
 from core.guardrails import ConfidenceLevel, ConfidenceScorer, ResponseValidator
@@ -14,6 +16,10 @@ from services.rag.generator import GeneratedResponse, GroundedGenerator
 from services.rag.query_processor import ProcessedQuery, QueryProcessor
 from services.rag.retriever import HVACRetriever
 from services.rag.vector_store import HVACVectorStore
+
+if TYPE_CHECKING:
+    from services.rag.diagnostic_engine import DiagnosticEngine
+    from services.rag.terminology import TerminologyMapper
 
 logger = get_logger("rag.pipeline")
 
@@ -46,16 +52,22 @@ class RAGPipeline:
         llm_client: LLMClient | None = None,
         vector_store: HVACVectorStore | None = None,
         embedder: HVACEmbedder | None = None,
+        diagnostic_engine: DiagnosticEngine | None = None,
+        terminology_mapper: TerminologyMapper | None = None,
     ):
         # Initialize components
         self.llm = llm_client or LLMClient()
         self.vector_store = vector_store or HVACVectorStore()
         self.embedder = embedder or HVACEmbedder()
 
+        # Diagnostic and terminology services
+        self.diagnostic_engine = diagnostic_engine
+        self.terminology_mapper = terminology_mapper
+
         # Build services
         self.query_processor = QueryProcessor(self.llm)
         self.retriever = HVACRetriever(self.vector_store, self.embedder)
-        self.generator = GroundedGenerator(self.llm)
+        self.generator = GroundedGenerator(self.llm, terminology_mapper=terminology_mapper)
         self.validator = ResponseValidator(self.llm)
         self.confidence_scorer = ConfidenceScorer()
 
@@ -112,6 +124,48 @@ class RAGPipeline:
         )
         logger.info(f"PIPELINE | Query processed | intent={processed_query.intent} | equipment_hints={processed_query.equipment_hints}")
 
+        # Step 1b: Apply terminology expansion to query for better retrieval
+        if self.terminology_mapper:
+            original_enhanced = processed_query.enhanced
+            processed_query = ProcessedQuery(
+                original=processed_query.original,
+                enhanced=self.terminology_mapper.apply_to_query(processed_query.enhanced),
+                intent=processed_query.intent,
+                equipment_hints=processed_query.equipment_hints,
+                urgency=processed_query.urgency,
+            )
+            if processed_query.enhanced != original_enhanced:
+                logger.info("PIPELINE | Query expanded with field terminology variants")
+
+        # Step 1c: Find diagnostic flowcharts for troubleshooting queries
+        diagnostic_context = None
+        diagnostic_flowchart_id = None
+        diagnostic_components: list[str] = []
+
+        if self.diagnostic_engine and processed_query.intent in ("diagnose", "repair"):
+            logger.debug("PIPELINE | Step 1c: Searching for diagnostic flowcharts...")
+            flowcharts = await self.diagnostic_engine.find_flowcharts(
+                symptom=processed_query.original,
+                equipment_context=equipment_context,
+            )
+            if flowcharts:
+                diagnostic_flowchart_id = flowcharts[0].id
+                diagnostic_context = self.diagnostic_engine.format_multiple_for_prompt(
+                    flowcharts[:2]
+                )
+                # Get ordered component list for retrieval re-ranking
+                diagnostic_components = self.diagnostic_engine.get_step_components(
+                    flowcharts[0]
+                )
+                logger.info(
+                    f"PIPELINE | Found {len(flowcharts)} diagnostic flowchart(s) | "
+                    f"primary={flowcharts[0].symptom} | components={diagnostic_components[:5]}"
+                )
+                # Track usage
+                await self.diagnostic_engine.increment_usage(flowcharts[0].id)
+            else:
+                logger.debug("PIPELINE | No matching diagnostic flowcharts found")
+
         # Track user message
         if self.tracker:
             await self._track_user_message(
@@ -134,13 +188,22 @@ class RAGPipeline:
             scores = [c["score"] for c in retrieval_result.chunks]
             logger.debug(f"PIPELINE | Retrieval scores: min={min(scores):.3f} max={max(scores):.3f} avg={sum(scores)/len(scores):.3f}")
 
-        # Step 3: Generate response
+        # Step 2b: Apply diagnostic re-ranking if flowchart available
+        if diagnostic_components and retrieval_result.chunks:
+            logger.debug("PIPELINE | Step 2b: Applying diagnostic re-ranking...")
+            retrieval_result.chunks = self.retriever.apply_diagnostic_ranking(
+                retrieval_result.chunks,
+                diagnostic_components,
+            )
+
+        # Step 3: Generate response with diagnostic context
         logger.debug("PIPELINE | Step 3: Generating response...")
         response = await self.generator.generate(
             query=query,
             retrieved_chunks=retrieval_result.chunks,
             equipment_context=equipment_context,
             conversation_history=conversation_history,
+            diagnostic_context=diagnostic_context,
         )
         logger.info(f"PIPELINE | Response generated | confidence={response.confidence.value} | citations={len(response.citations)}")
 

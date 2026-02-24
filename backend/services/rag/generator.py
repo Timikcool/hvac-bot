@@ -1,11 +1,16 @@
 """Grounded response generation for HVAC queries."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional, TYPE_CHECKING
 
 from core.guardrails import ConfidenceLevel
 from core.llm import LLMClient
 from core.logging import get_logger
+
+if TYPE_CHECKING:
+    from services.rag.terminology import TerminologyMapper
 
 logger = get_logger("rag.generator")
 
@@ -40,6 +45,22 @@ CRITICAL RULES:
 6. Prioritize safety - always include relevant warnings from the manuals
 7. Be concise - technicians need quick answers in the field
 
+TROUBLESHOOTING FORMAT (when diagnosing issues):
+- Present diagnostic checks ordered by PROBABILITY (most likely cause FIRST)
+- Format: "1. Check [X] first (most common cause)... 2. If not, check [Y]..."
+- Follow diagnostic flowchart logic, NOT alphabetical or textbook order
+- Each check should include: what to check, what you expect to find, what it means
+- If a DIAGNOSTIC FLOWCHART is provided below, use its ordering as your guide
+
+FIELD TERMINOLOGY:
+- Use field-standard terms, not textbook language
+- Say "contactor" not "relay contacts"
+- Say "TXV" not "thermostatic expansion valve"
+- Say "cap" or "capacitor" not "run capacitor"
+- Say "OL" or "overload" not "thermal overload relay"
+- Say "delta T" not "temperature differential"
+- Say "amp draw" not "ampere draw"
+
 RESPONSE FORMAT:
 - Start with direct answer to the question
 - Include step-by-step instructions if applicable
@@ -47,8 +68,13 @@ RESPONSE FORMAT:
 - Add safety warnings if relevant (from manuals)
 - Keep it practical and actionable"""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        terminology_mapper: Optional[TerminologyMapper] = None,
+    ):
         self.llm = llm_client
+        self.terminology = terminology_mapper
 
     async def generate(
         self,
@@ -56,6 +82,7 @@ RESPONSE FORMAT:
         retrieved_chunks: list[dict[str, Any]],
         equipment_context: dict[str, Any],
         conversation_history: list[dict[str, Any]] | None = None,
+        diagnostic_context: str | None = None,
     ) -> GeneratedResponse:
         """Generate a grounded response with citations.
 
@@ -64,12 +91,15 @@ RESPONSE FORMAT:
             retrieved_chunks: Retrieved source chunks
             equipment_context: Equipment brand/model context
             conversation_history: Previous messages
+            diagnostic_context: Formatted diagnostic flowchart text (from DiagnosticEngine)
 
         Returns:
             GeneratedResponse with answer and metadata
         """
         logger.info(f"GENERATOR | Generating response | chunks={len(retrieved_chunks)} | query={query[:60]}...")
         logger.debug(f"GENERATOR | Equipment: {equipment_context}")
+        if diagnostic_context:
+            logger.info("GENERATOR | Diagnostic flowchart context provided")
 
         # Check if we have sufficient information
         if not retrieved_chunks or all(c["score"] < 0.5 for c in retrieved_chunks):
@@ -80,18 +110,31 @@ RESPONSE FORMAT:
         formatted_sources = self._format_sources(retrieved_chunks)
         logger.debug(f"GENERATOR | Formatted {len(retrieved_chunks)} sources | total_chars={len(formatted_sources)}")
 
+        # Build user prompt with optional diagnostic context
+        diagnostic_section = ""
+        if diagnostic_context:
+            diagnostic_section = f"""
+{diagnostic_context}
+
+IMPORTANT: Use the diagnostic flowchart above to ORDER your troubleshooting steps.
+Present the highest-priority checks FIRST. The flowchart reflects real-world failure
+probabilities from experienced technicians.
+
+"""
+
         user_prompt = f"""EQUIPMENT CONTEXT:
 - Brand: {equipment_context.get('brand', 'Unknown')}
 - Model: {equipment_context.get('model', 'Unknown')}
 - System Type: {equipment_context.get('system_type', 'Unknown')}
-
+{diagnostic_section}
 AVAILABLE SOURCES:
 {formatted_sources}
 
 TECHNICIAN'S QUESTION:
 {query}
 
-Remember: Only answer based on the sources above. Cite each source used."""
+Remember: Only answer based on the sources above. Cite each source used.
+Order troubleshooting steps by probability (most likely cause first)."""
 
         # Build messages with history
         messages = []
@@ -113,6 +156,16 @@ Remember: Only answer based on the sources above. Cite each source used."""
 
         answer = response.content
         logger.debug(f"GENERATOR | LLM response received | length={len(answer)} chars")
+
+        # Apply terminology corrections (textbook → field terms)
+        terminology_corrections = {}
+        if self.terminology:
+            terminology_corrections = self.terminology.get_corrections_summary(answer)
+            answer = self.terminology.apply_to_response(answer)
+            if terminology_corrections:
+                logger.info(
+                    f"GENERATOR | Applied {len(terminology_corrections)} terminology corrections"
+                )
 
         # Post-process response
         citations = self._extract_citations(answer, retrieved_chunks)

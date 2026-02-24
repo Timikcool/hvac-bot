@@ -24,8 +24,22 @@ class User(Base, UUIDMixin, TimestampMixin):
     )  # For SSO
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Messaging platform IDs (OpenClaw integration)
+    telegram_id: Mapped[Optional[str]] = mapped_column(
+        String(100), unique=True, nullable=True
+    )
+    whatsapp_id: Mapped[Optional[str]] = mapped_column(
+        String(100), unique=True, nullable=True
+    )
+    platform_source: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True
+    )  # "web", "telegram", "whatsapp"
+
     # Preferences
     preferred_brands: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    experience_level: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True
+    )  # "apprentice", "journeyman", "master", "instructor"
     last_active_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 

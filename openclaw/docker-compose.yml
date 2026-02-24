@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3100:3100"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - WHATSAPP_PAIRING_CODE=${WHATSAPP_PAIRING_CODE}
+      - HVAC_BACKEND_URL=${HVAC_BACKEND_URL:-http://api:8000}
+      - OPENCLAW_SHARED_SECRET=${OPENCLAW_SHARED_SECRET}
+    volumes:
+      - openclaw_memory:/app/workspace/memory
+    restart: unless-stopped
+    networks:
+      - hvac-network
+
+networks:
+  hvac-network:
+    external: true
+
+volumes:
+  openclaw_memory:

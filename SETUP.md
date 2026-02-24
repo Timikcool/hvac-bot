@@ -132,23 +132,49 @@ hvac_bot/
 ├── backend/
 │   ├── .env                 # API keys & config
 │   ├── main.py              # FastAPI application
-│   ├── api/                 # API routes
+│   ├── api/
+│   │   ├── routes.py        # Chat, feedback, image endpoints
+│   │   ├── admin_routes.py  # Admin: diagnostics, terminology, corrections
+│   │   └── openclaw_routes.py # OpenClaw webhook endpoints
+│   ├── models/
+│   │   ├── user.py          # User model (+ Telegram/WhatsApp IDs)
+│   │   ├── conversation.py  # Messages, feedback
+│   │   └── diagnostic.py    # Flowcharts, steps, terminology, corrections
 │   ├── services/
-│   │   ├── rag/             # RAG pipeline
-│   │   ├── ingestion/       # Document parsing
-│   │   └── gcp/             # Google Cloud services
+│   │   ├── rag/
+│   │   │   ├── pipeline.py          # Main RAG pipeline
+│   │   │   ├── retriever.py         # Multi-stage retrieval + diagnostic re-ranking
+│   │   │   ├── generator.py         # Grounded response generation
+│   │   │   ├── query_processor.py   # Intent detection (+ correction intent)
+│   │   │   ├── terminology.py       # Field terminology mapper
+│   │   │   └── diagnostic_engine.py # Probability-ordered diagnostics
+│   │   ├── improvement/
+│   │   │   ├── correction_processor.py # In-chat correction detection
+│   │   │   └── feedback_aggregator.py  # Feedback analysis & reports
+│   │   ├── openclaw/
+│   │   │   └── user_sync.py  # Cross-platform user identity
+│   │   ├── ingestion/        # Document parsing
+│   │   └── gcp/              # Google Cloud services
+│   ├── tests/                # Unit tests
 │   └── data/
-│       └── manuals/         # Uploaded PDFs
+│       └── manuals/          # Uploaded PDFs
 ├── frontend/
-│   ├── components/          # React components
-│   ├── api/                 # API client
-│   └── hooks/               # Custom hooks
+│   ├── components/           # React components
+│   ├── api/                  # API client
+│   └── hooks/                # Custom hooks
+├── openclaw/                  # OpenClaw messaging gateway
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── config.yaml
+│   └── workspace/
+│       ├── SOUL.md           # HVAC personality definition
+│       └── skills/           # OpenClaw skill definitions
 ├── scripts/
-│   ├── deploy.sh            # Deployment helper
-│   ├── backup-qdrant.sh     # Backup script
-│   └── migrate-to-cloud.sh  # Cloud migration
-├── docker-compose.yml       # Infrastructure
-└── SETUP.md                 # This file
+│   ├── deploy.sh             # Deployment helper
+│   ├── backup-qdrant.sh      # Backup script
+│   └── migrate-to-cloud.sh   # Cloud migration
+├── docker-compose.yml         # Infrastructure
+└── SETUP.md                   # This file
 ```
 
 ---
@@ -187,4 +213,28 @@ alembic upgrade head
 curl http://localhost:6333/collections/hvac_manuals | jq
 ```
 
+---
 
+## Running Tests
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest tests/ -v
+```
+
+---
+
+## New Features (v2)
+
+The following features were added in the diagnostic quality & self-improvement update:
+
+**Diagnostic Engine** - Probability-ordered troubleshooting flowcharts that present the most likely cause first, supplementing RAG retrieval with expert-curated diagnostic paths.
+
+**Field Terminology Mapper** - Automatically converts textbook language (e.g., "relay contacts") to field-standard terminology (e.g., "contactor") in both queries and responses. Includes ~50 seed mappings and learns from technician corrections.
+
+**Self-Improvement System** - Detects in-chat corrections from technicians (e.g., "that's wrong, check the contactor first") and applies them to improve future responses by updating terminology mappings and diagnostic step priorities.
+
+**OpenClaw Integration** - Messaging gateway for Telegram and WhatsApp access with persistent per-user memory and HVAC-specific personality.
+
+**Admin Endpoints** - Management of diagnostic flowcharts, terminology mappings, and pending corrections via `/admin/` API routes.

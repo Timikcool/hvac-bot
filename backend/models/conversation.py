@@ -79,6 +79,15 @@ class Message(Base, UUIDMixin):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Diagnostic tracking
+    diagnostic_flowchart_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("diagnostic_flowcharts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    terminology_corrections_applied: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+
     # Fine-tuning annotations
     is_good_example: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     annotation_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -148,6 +157,9 @@ class MessageFeedback(Base, UUIDMixin):
     feedback_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     correct_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     missing_information: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    correction_type: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True
+    )  # wrong_order, wrong_terminology, missing_step, good
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships

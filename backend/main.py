@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.admin_routes import router as admin_router
+from api.openclaw_routes import router as openclaw_router
 from api.routes import router as api_router
 from config import get_settings
 from core.logging import setup_logging, get_logger
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(api_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)
+    app.include_router(openclaw_router, prefix=settings.api_prefix)
 
     return app
 

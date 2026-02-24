@@ -146,6 +146,70 @@ class HVACRetriever:
             retrieval_strategy="dense_filtered",
         )
 
+    def apply_diagnostic_ranking(
+        self,
+        chunks: list[dict[str, Any]],
+        diagnostic_components: list[str],
+    ) -> list[dict[str, Any]]:
+        """Re-rank retrieved chunks by diagnostic probability.
+
+        Boosts chunks that mention high-priority diagnostic components.
+        This ensures that chunks about the most likely failure cause
+        (e.g., capacitor) rank above less likely causes (e.g., wiring).
+
+        Args:
+            chunks: Retrieved chunks as dicts
+            diagnostic_components: Ordered list of component names from
+                diagnostic flowchart (index 0 = highest priority)
+
+        Returns:
+            Re-ranked chunks
+        """
+        if not diagnostic_components or not chunks:
+            return chunks
+
+        # Build component → boost multiplier mapping
+        # First component (most likely cause) gets highest boost
+        component_boost: dict[str, float] = {}
+        for i, component in enumerate(diagnostic_components):
+            # Boost decreases with position: 1.5, 1.4, 1.3, 1.2, 1.1
+            boost = max(1.1, 1.5 - (i * 0.1))
+            component_boost[component.lower()] = boost
+
+        # Apply boost to chunk scores
+        boosted_chunks = []
+        for chunk in chunks:
+            content_lower = chunk.get("content", "").lower()
+            metadata = chunk.get("metadata", {})
+            chunk_component = (metadata.get("component", "") or "").lower()
+
+            best_boost = 1.0
+            matched_component = None
+
+            for component, boost in component_boost.items():
+                if component in content_lower or component in chunk_component:
+                    if boost > best_boost:
+                        best_boost = boost
+                        matched_component = component
+
+            boosted_chunk = dict(chunk)
+            original_score = boosted_chunk.get("score", 0)
+            boosted_chunk["score"] = original_score * best_boost
+            boosted_chunk["_diagnostic_boost"] = best_boost
+            boosted_chunk["_matched_component"] = matched_component
+            boosted_chunks.append(boosted_chunk)
+
+        # Re-sort by boosted score
+        boosted_chunks.sort(key=lambda c: c["score"], reverse=True)
+
+        boosted_count = sum(1 for c in boosted_chunks if c.get("_diagnostic_boost", 1.0) > 1.0)
+        if boosted_count:
+            logger.info(
+                f"RETRIEVER | Diagnostic ranking boosted {boosted_count}/{len(chunks)} chunks"
+            )
+
+        return boosted_chunks
+
     def _build_filters(
         self,
         query: ProcessedQuery,

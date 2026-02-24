@@ -144,6 +144,44 @@ psql "postgresql://postgres:PASSWORD@PUBLIC_HOST:PORT/railway" < backup.sql
 
 ---
 
+## Deploy OpenClaw Gateway (Optional)
+
+The OpenClaw gateway enables Telegram and WhatsApp messaging channels.
+
+### Step 1: Set OpenClaw Environment Variables
+```bash
+railway variables set -s openclaw \
+  ANTHROPIC_API_KEY="sk-ant-..." \
+  HVAC_BACKEND_URL="https://hvac-api-production.up.railway.app" \
+  OPENCLAW_SHARED_SECRET="your-shared-secret" \
+  TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
+```
+
+### Step 2: Set Backend Secret (must match)
+```bash
+railway variables set -s hvac-api \
+  OPENCLAW_SHARED_SECRET="your-shared-secret"
+```
+
+### Step 3: Deploy
+```bash
+cd openclaw
+railway up --service openclaw
+```
+
+### New Admin Endpoints
+After deployment, the following new endpoints are available:
+
+- `GET /api/admin/diagnostic-flowcharts` - List diagnostic flowcharts
+- `POST /api/admin/diagnostic-flowcharts` - Create flowchart
+- `GET /api/admin/terminology` - List terminology mappings
+- `POST /api/admin/terminology` - Add terminology mapping
+- `GET /api/admin/corrections/pending` - Review pending corrections
+- `POST /api/admin/corrections/{id}/apply` - Approve a correction
+- `GET /api/admin/improvement-report` - Weekly improvement stats
+
+---
+
 ## Alternative Deployments
 
 ### Render

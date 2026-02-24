@@ -12,7 +12,7 @@ class ProcessedQuery:
 
     original: str
     enhanced: str
-    intent: str  # diagnose, repair, install, maintain, find_spec, understand_error
+    intent: str  # diagnose, repair, install, maintain, find_spec, understand_error, correction
     equipment_hints: dict[str, Any]
     urgency: str  # routine, urgent, safety
 
@@ -55,7 +55,7 @@ Query: "{query}"
 Previous conversation context: {history_context or "None"}
 
 Extract:
-1. PRIMARY_INTENT: What is the technician trying to do? (diagnose, repair, install, maintain, find_spec, understand_error)
+1. PRIMARY_INTENT: What is the technician trying to do? (diagnose, repair, install, maintain, find_spec, understand_error, correction)
 2. EQUIPMENT_TYPE: What type of equipment? (air_conditioner, heat_pump, furnace, boiler, mini_split, chiller, rooftop_unit, unknown)
 3. BRAND_HINTS: Any brand names mentioned or implied?
 4. MODEL_HINTS: Any model numbers or series mentioned?
@@ -104,7 +104,14 @@ Respond in JSON format."""
 
         # Detect intent from keywords
         intent = "diagnose"
-        if any(kw in query_lower for kw in ["spec", "rating", "capacity", "tonnage", "seer"]):
+        if any(phrase in query_lower for phrase in [
+            "that's wrong", "that is wrong", "actually you should",
+            "no, check", "wrong order", "we call that", "we say",
+            "it's called", "not correct", "incorrect",
+            "should be first", "should check first", "you got it backwards",
+        ]):
+            intent = "correction"
+        elif any(kw in query_lower for kw in ["spec", "rating", "capacity", "tonnage", "seer"]):
             intent = "find_spec"
         elif any(kw in query_lower for kw in ["error", "code", "fault", "e", "f"]):
             intent = "understand_error"

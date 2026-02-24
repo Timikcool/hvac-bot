@@ -2,6 +2,12 @@
 
 from models.base import Base
 from models.conversation import Conversation, Message, MessageRetrieval, MessageFeedback
+from models.diagnostic import (
+    DiagnosticFlowchart,
+    DiagnosticStep,
+    FeedbackCorrection,
+    TerminologyMapping,
+)
 from models.manual import Manual, ManualChunk
 from models.analytics import RetrievalQualityMetric, KnowledgeGap
 from models.experiment import Experiment, ExperimentExposure, ExperimentOutcome
@@ -13,6 +19,10 @@ __all__ = [
     "Message",
     "MessageRetrieval",
     "MessageFeedback",
+    "DiagnosticFlowchart",
+    "DiagnosticStep",
+    "TerminologyMapping",
+    "FeedbackCorrection",
     "Manual",
     "ManualChunk",
     "RetrievalQualityMetric",

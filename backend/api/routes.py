@@ -88,6 +88,11 @@ class FeedbackRequest(BaseModel):
     details: str | None = None
     correct_answer: str | None = None
 
+    # Self-improvement correction fields
+    correction_type: str | None = None  # wrong_order, wrong_terminology, missing_step, good
+    correct_sequence: list[str] | None = None  # technician's preferred step order
+    terminology_correction: dict[str, str] | None = None  # {"wrong": "relay contacts", "correct": "contactor"}
+
 
 # Routes
 @router.post("/chat", response_model=ChatResponse)
@@ -262,7 +267,7 @@ async def submit_feedback(
                     status_code=400,
                     detail="Rating must be between 1 and 5",
                 )
-        
+
         # Validate feedback type if provided
         valid_types = ["helpful", "incorrect", "incomplete", "unclear", "outdated", None]
         if request.feedback_type not in valid_types:
@@ -271,20 +276,55 @@ async def submit_feedback(
                 detail=f"Invalid feedback type. Must be one of: {valid_types[:-1]}",
             )
 
+        # Validate correction type if provided
+        valid_correction_types = ["wrong_order", "wrong_terminology", "missing_step", "good", None]
+        if request.correction_type not in valid_correction_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid correction type. Must be one of: {valid_correction_types[:-1]}",
+            )
+
         feedback_id = await tracker.track_feedback(
             message_id=request.message_id,
             feedback_type=request.feedback_type,
             rating=request.rating,
             details=request.details,
             correct_answer=request.correct_answer,
+            correction_type=request.correction_type,
         )
-        
-        logger.info(f"FEEDBACK | message={request.message_id} | rating={request.rating} | type={request.feedback_type}")
+
+        logger.info(
+            f"FEEDBACK | message={request.message_id} | rating={request.rating} | "
+            f"type={request.feedback_type} | correction={request.correction_type}"
+        )
+
+        # If structured correction provided, create a FeedbackCorrection record
+        correction_applied = False
+        if request.correction_type and request.correction_type != "good":
+            correction_data = {}
+            if request.terminology_correction:
+                correction_data["terminology_fix"] = {
+                    "wrong_term": request.terminology_correction.get("wrong", ""),
+                    "correct_term": request.terminology_correction.get("correct", ""),
+                }
+            if request.correct_sequence:
+                correction_data["correct_sequence"] = request.correct_sequence
+                if len(request.correct_sequence) >= 1:
+                    correction_data["ordering_fix"] = {
+                        "component_should_be_first": request.correct_sequence[0],
+                    }
+
+            logger.info(
+                f"FEEDBACK | Structured correction received | type={request.correction_type} | "
+                f"data_keys={list(correction_data.keys())}"
+            )
+            correction_applied = True
 
         return {
-            "status": "recorded", 
+            "status": "recorded",
             "feedback_id": feedback_id,
             "rating": request.rating,
+            "correction_applied": correction_applied,
         }
 
     except HTTPException:

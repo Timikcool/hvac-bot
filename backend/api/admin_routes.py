@@ -717,6 +717,91 @@ async def reset_daily_metrics(
     return {"status": "reset"}
 
 
+@router.get("/stats")
+async def get_system_stats(
+    db: AsyncSession = Depends(get_db),
+    redis: Redis | None = Depends(get_redis),
+) -> dict[str, Any]:
+    """Get comprehensive system statistics - conversations, messages, feedback, vector store."""
+    from sqlalchemy import select, func
+    from models.conversation import Conversation, Message, MessageFeedback
+    
+    # Database stats
+    conv_count = await db.execute(select(func.count(Conversation.id)))
+    msg_count = await db.execute(select(func.count(Message.id)))
+    feedback_count = await db.execute(select(func.count(MessageFeedback.id)))
+    
+    # Rating stats
+    avg_rating = await db.execute(
+        select(func.avg(MessageFeedback.rating)).where(MessageFeedback.rating.isnot(None))
+    )
+    
+    rating_dist = await db.execute(
+        select(MessageFeedback.rating, func.count(MessageFeedback.id).label("count"))
+        .where(MessageFeedback.rating.isnot(None))
+        .group_by(MessageFeedback.rating)
+        .order_by(MessageFeedback.rating)
+    )
+    
+    # Feedback type distribution
+    type_dist = await db.execute(
+        select(MessageFeedback.feedback_type, func.count(MessageFeedback.id).label("count"))
+        .where(MessageFeedback.feedback_type.isnot(None))
+        .group_by(MessageFeedback.feedback_type)
+    )
+    
+    # Vector store stats
+    vector_stats = {}
+    try:
+        vector_store = HVACVectorStore()
+        qdrant_stats = await vector_store.get_stats()
+        documents = await vector_store.list_documents()
+        vector_stats = {
+            "status": qdrant_stats.get("status", "unknown"),
+            "points_count": qdrant_stats.get("points_count", 0),
+            "documents_count": len(documents),
+            "documents": documents,
+        }
+    except Exception as e:
+        vector_stats = {"status": "error", "error": str(e)}
+    
+    # Redis real-time stats
+    realtime = {}
+    if redis:
+        try:
+            pipe = redis.pipeline()
+            pipe.get("stats:conversations:today")
+            pipe.get("stats:escalations:today")
+            pipe.hgetall("stats:confidence:distribution")
+            results = await pipe.execute()
+            
+            realtime = {
+                "conversations_today": int(results[0] or 0),
+                "escalations_today": int(results[1] or 0),
+                "confidence_distribution": {
+                    (k.decode() if isinstance(k, bytes) else k): int(v.decode() if isinstance(v, bytes) else v)
+                    for k, v in (results[2] or {}).items()
+                },
+            }
+        except Exception:
+            pass
+    
+    return {
+        "database": {
+            "conversations": conv_count.scalar() or 0,
+            "messages": msg_count.scalar() or 0,
+            "feedback_entries": feedback_count.scalar() or 0,
+        },
+        "feedback": {
+            "average_rating": round(float(avg_rating.scalar() or 0), 2),
+            "rating_distribution": {str(r.rating): r.count for r in rating_dist.all()},
+            "type_distribution": {r.feedback_type: r.count for r in type_dist.all()},
+        },
+        "vector_store": vector_stats,
+        "realtime": realtime,
+    }
+
+
 @router.get("/feedback/stats")
 async def get_feedback_stats(
     db: AsyncSession = Depends(get_db),
@@ -1058,4 +1143,374 @@ async def end_experiment(
         "name": experiment.name,
         "status": "ended",
         "end_date": experiment.end_date.isoformat(),
+    }
+
+
+# ============================================================================
+# DIAGNOSTIC FLOWCHART MANAGEMENT
+# ============================================================================
+
+
+class FlowchartCreateRequest(BaseModel):
+    """Create a diagnostic flowchart."""
+
+    symptom: str
+    description: str | None = None
+    equipment_brand: str | None = None
+    equipment_model: str | None = None
+    system_type: str | None = None
+    category: str | None = None
+    symptom_keywords: list[str] | None = None
+
+
+class StepCreateRequest(BaseModel):
+    """Create a diagnostic step."""
+
+    step_order: int
+    priority_weight: int = 50
+    check_description: str
+    expected_result: str | None = None
+    if_fail_action: str | None = None
+    if_pass_action: str | None = None
+    component: str | None = None
+    tools_needed: str | None = None
+    safety_warning: str | None = None
+
+
+@router.get("/diagnostic-flowcharts")
+async def list_flowcharts(
+    brand: str | None = None,
+    active_only: bool = True,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """List all diagnostic flowcharts."""
+    from sqlalchemy import select
+    from models.diagnostic import DiagnosticFlowchart
+
+    query = select(DiagnosticFlowchart)
+    if active_only:
+        query = query.where(DiagnosticFlowchart.is_active == True)
+    if brand:
+        query = query.where(DiagnosticFlowchart.equipment_brand == brand)
+    query = query.order_by(DiagnosticFlowchart.usage_count.desc())
+
+    result = await db.execute(query)
+    flowcharts = result.scalars().all()
+
+    return [
+        {
+            "id": f.id,
+            "symptom": f.symptom,
+            "description": f.description,
+            "equipment_brand": f.equipment_brand,
+            "equipment_model": f.equipment_model,
+            "system_type": f.system_type,
+            "category": f.category,
+            "is_active": f.is_active,
+            "usage_count": f.usage_count,
+            "success_rate": f.success_rate,
+            "step_count": len(f.steps) if f.steps else 0,
+        }
+        for f in flowcharts
+    ]
+
+
+@router.post("/diagnostic-flowcharts")
+async def create_flowchart(
+    request: FlowchartCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a new diagnostic flowchart."""
+    from models.diagnostic import DiagnosticFlowchart
+
+    flowchart = DiagnosticFlowchart(
+        symptom=request.symptom,
+        description=request.description,
+        equipment_brand=request.equipment_brand,
+        equipment_model=request.equipment_model,
+        system_type=request.system_type,
+        category=request.category,
+        symptom_keywords=request.symptom_keywords,
+        is_active=True,
+    )
+
+    db.add(flowchart)
+    await db.commit()
+    await db.refresh(flowchart)
+
+    return {"id": flowchart.id, "symptom": flowchart.symptom, "status": "created"}
+
+
+@router.put("/diagnostic-flowcharts/{flowchart_id}")
+async def update_flowchart(
+    flowchart_id: str,
+    request: FlowchartCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Update an existing diagnostic flowchart."""
+    from sqlalchemy import select
+    from models.diagnostic import DiagnosticFlowchart
+
+    result = await db.execute(
+        select(DiagnosticFlowchart).where(DiagnosticFlowchart.id == flowchart_id)
+    )
+    flowchart = result.scalar_one_or_none()
+    if not flowchart:
+        raise HTTPException(status_code=404, detail="Flowchart not found")
+
+    flowchart.symptom = request.symptom
+    flowchart.description = request.description
+    flowchart.equipment_brand = request.equipment_brand
+    flowchart.equipment_model = request.equipment_model
+    flowchart.system_type = request.system_type
+    flowchart.category = request.category
+    flowchart.symptom_keywords = request.symptom_keywords
+
+    await db.commit()
+    return {"id": flowchart_id, "status": "updated"}
+
+
+@router.get("/diagnostic-flowcharts/{flowchart_id}/steps")
+async def get_flowchart_steps(
+    flowchart_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Get ordered steps for a diagnostic flowchart."""
+    from sqlalchemy import select
+    from models.diagnostic import DiagnosticStep
+
+    result = await db.execute(
+        select(DiagnosticStep)
+        .where(DiagnosticStep.flowchart_id == flowchart_id)
+        .order_by(DiagnosticStep.priority_weight.desc())
+    )
+    steps = result.scalars().all()
+
+    return [
+        {
+            "id": s.id,
+            "step_order": s.step_order,
+            "priority_weight": s.priority_weight,
+            "check_description": s.check_description,
+            "expected_result": s.expected_result,
+            "if_fail_action": s.if_fail_action,
+            "if_pass_action": s.if_pass_action,
+            "component": s.component,
+            "tools_needed": s.tools_needed,
+            "safety_warning": s.safety_warning,
+            "times_confirmed": s.times_confirmed,
+            "times_corrected": s.times_corrected,
+        }
+        for s in steps
+    ]
+
+
+@router.post("/diagnostic-flowcharts/{flowchart_id}/steps")
+async def add_flowchart_step(
+    flowchart_id: str,
+    request: StepCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Add a step to a diagnostic flowchart."""
+    from models.diagnostic import DiagnosticStep
+
+    step = DiagnosticStep(
+        flowchart_id=flowchart_id,
+        step_order=request.step_order,
+        priority_weight=request.priority_weight,
+        check_description=request.check_description,
+        expected_result=request.expected_result,
+        if_fail_action=request.if_fail_action,
+        if_pass_action=request.if_pass_action,
+        component=request.component,
+        tools_needed=request.tools_needed,
+        safety_warning=request.safety_warning,
+    )
+
+    db.add(step)
+    await db.commit()
+    await db.refresh(step)
+
+    return {"id": step.id, "status": "created"}
+
+
+# ============================================================================
+# TERMINOLOGY MANAGEMENT
+# ============================================================================
+
+
+class TerminologyCreateRequest(BaseModel):
+    """Create a terminology mapping."""
+
+    textbook_term: str
+    field_term: str
+    context: str | None = None
+
+
+@router.get("/terminology")
+async def list_terminology(
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """List all terminology mappings."""
+    from sqlalchemy import select
+    from models.diagnostic import TerminologyMapping
+
+    result = await db.execute(
+        select(TerminologyMapping).order_by(TerminologyMapping.confirmed_by_count.desc())
+    )
+    mappings = result.scalars().all()
+
+    return [
+        {
+            "id": m.id,
+            "textbook_term": m.textbook_term,
+            "field_term": m.field_term,
+            "context": m.context,
+            "source": m.source,
+            "confirmed_by_count": m.confirmed_by_count,
+        }
+        for m in mappings
+    ]
+
+
+@router.post("/terminology")
+async def create_terminology(
+    request: TerminologyCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Add a new terminology mapping."""
+    from models.diagnostic import TerminologyMapping
+
+    mapping = TerminologyMapping(
+        textbook_term=request.textbook_term,
+        field_term=request.field_term,
+        context=request.context,
+        source="admin",
+    )
+
+    db.add(mapping)
+    await db.commit()
+    await db.refresh(mapping)
+
+    return {"id": mapping.id, "status": "created"}
+
+
+@router.delete("/terminology/{mapping_id}")
+async def delete_terminology(
+    mapping_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Delete a terminology mapping."""
+    from sqlalchemy import select, delete
+    from models.diagnostic import TerminologyMapping
+
+    result = await db.execute(
+        delete(TerminologyMapping).where(TerminologyMapping.id == mapping_id)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+
+    await db.commit()
+    return {"status": "deleted", "id": mapping_id}
+
+
+# ============================================================================
+# CORRECTIONS MANAGEMENT
+# ============================================================================
+
+
+@router.get("/corrections/pending")
+async def get_pending_corrections(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """List pending corrections for admin review."""
+    from sqlalchemy import select
+    from models.diagnostic import FeedbackCorrection
+
+    result = await db.execute(
+        select(FeedbackCorrection)
+        .where(FeedbackCorrection.status == "pending")
+        .order_by(FeedbackCorrection.created_at.desc())
+        .limit(limit)
+    )
+    corrections = result.scalars().all()
+
+    return [
+        {
+            "id": c.id,
+            "correction_type": c.correction_type,
+            "original_text": c.original_text,
+            "corrected_text": c.corrected_text,
+            "correction_data": c.correction_data,
+            "status": c.status,
+            "message_id": c.message_id,
+            "conversation_id": c.conversation_id,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in corrections
+    ]
+
+
+@router.post("/corrections/{correction_id}/apply")
+async def apply_correction(
+    correction_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Approve and apply a correction."""
+    from sqlalchemy import select
+    from models.diagnostic import FeedbackCorrection
+
+    result = await db.execute(
+        select(FeedbackCorrection).where(FeedbackCorrection.id == correction_id)
+    )
+    correction = result.scalar_one_or_none()
+
+    if not correction:
+        raise HTTPException(status_code=404, detail="Correction not found")
+
+    correction.status = "applied"
+    await db.commit()
+
+    return {"status": "applied", "id": correction_id}
+
+
+@router.post("/corrections/{correction_id}/reject")
+async def reject_correction(
+    correction_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Reject a correction."""
+    from sqlalchemy import select
+    from models.diagnostic import FeedbackCorrection
+
+    result = await db.execute(
+        select(FeedbackCorrection).where(FeedbackCorrection.id == correction_id)
+    )
+    correction = result.scalar_one_or_none()
+
+    if not correction:
+        raise HTTPException(status_code=404, detail="Correction not found")
+
+    correction.status = "rejected"
+    await db.commit()
+
+    return {"status": "rejected", "id": correction_id}
+
+
+@router.get("/improvement-report")
+async def get_improvement_report(
+    days: int = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get weekly self-improvement report."""
+    from services.improvement.feedback_aggregator import FeedbackAggregator
+
+    aggregator = FeedbackAggregator(db)
+    report_text = await aggregator.generate_report(days=days)
+    analysis = await aggregator.analyze_corrections(days=days)
+
+    return {
+        "report": report_text,
+        "analysis": analysis,
     }

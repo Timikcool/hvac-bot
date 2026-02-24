@@ -1,0 +1,41 @@
+# OpenClaw Configuration for HVAC Assistant
+name: hvac-assistant
+
+# LLM Provider
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key_env: ANTHROPIC_API_KEY
+
+# Workspace
+workspace:
+  soul: workspace/SOUL.md
+  skills_dir: workspace/skills
+  memory_dir: workspace/memory
+
+# Memory settings
+memory:
+  enabled: true
+  session_indexing: true
+  per_user: true
+
+# Channels
+channels:
+  telegram:
+    enabled: true
+    bot_token_env: TELEGRAM_BOT_TOKEN
+  whatsapp:
+    enabled: true
+    pairing_code_env: WHATSAPP_PAIRING_CODE
+    provider: baileys
+
+# Backend integration
+backend:
+  url_env: HVAC_BACKEND_URL
+  shared_secret_env: OPENCLAW_SHARED_SECRET
+  timeout_ms: 30000
+
+# Server
+server:
+  port: 3100
+  host: 0.0.0.0
